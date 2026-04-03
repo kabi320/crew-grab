@@ -6,18 +6,25 @@
     <title>Ecrew Grab Pro</title>
     <style>
         :root { --blue: #007AFF; --orange: #FF9500; --bg: #F2F2F7; }
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #1C1C1E; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #1C1C1E; padding-bottom: 100px; }
         .card { background: white; border-radius: 15px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; text-align: center; }
         h1 { font-size: 24px; margin: 10px 0; }
-        input, select, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 10px; border: 1px solid #DDD; font-size: 16px; }
-        .btn-primary { background: var(--blue); color: white; border: none; font-weight: bold; }
-        .btn-sync { background: var(--orange); color: white; border: none; font-weight: bold; margin-top: 20px; display: none; }
+        .settings-row { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-size: 14px; font-weight: bold; }
+        input[type="text"] { width: 60px; padding: 8px; border-radius: 8px; border: 1px solid #DDD; text-align: center; text-transform: uppercase; }
+        input[type="file"] { width: 100%; margin-top: 15px; }
+        
+        .controls { display: flex; justify-content: space-between; align-items: center; padding: 10px; margin-bottom: 10px; }
+        .btn-link { background: none; border: none; color: var(--blue); font-weight: bold; cursor: pointer; font-size: 14px; }
+        
         #logStatus { font-size: 12px; color: #8E8E93; margin-top: 10px; }
-        .flight-item { background: #FFF; border-bottom: 1px solid #EEE; padding: 15px; display: flex; align-items: center; text-align: left; }
-        .flight-info { flex-grow: 1; margin-left: 10px; }
-        .flight-date { font-weight: bold; }
-        .flight-route { font-size: 14px; color: #666; }
-        .flight-time { font-family: monospace; color: var(--blue); font-size: 12px; }
+        .flight-item { background: #FFF; border-radius: 12px; padding: 15px; display: flex; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.03); }
+        .flight-info { flex-grow: 1; margin-left: 15px; }
+        .flight-date { font-weight: bold; font-size: 16px; }
+        .flight-route { font-size: 14px; color: #666; margin: 4px 0; }
+        .flight-time { font-family: monospace; color: var(--blue); font-size: 13px; font-weight: bold; }
+        
+        .footer { position: fixed; bottom: 0; left: 0; right: 0; background: white; padding: 20px; border-top: 1px solid #DDD; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); text-align: center; }
+        .btn-sync { background: var(--orange); color: white; border: none; font-weight: bold; border-radius: 10px; width: 100%; padding: 15px; font-size: 16px; display: none; }
     </style>
 </head>
 <body>
@@ -25,16 +32,29 @@
     <div class="card">
         <div style="font-size: 50px;">✈️</div>
         <h1>Ecrew Grab Pro</h1>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <label>Airline:</label>
-            <input type="text" id="prefix" value="UO" style="width: 60px; text-transform: uppercase;">
+        
+        <div class="settings-row">
+            <div>Airline: <input type="text" id="prefix" value="UO" maxlength="3"></div>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="includeNote"> Sync Note
+            </div>
         </div>
+        
         <input type="file" id="fileInput" accept=".txt,.text">
         <div id="logStatus">Ready to parse...</div>
     </div>
 
+    <div class="controls" id="bulkControls" style="display: none;">
+        <button class="btn-link" onclick="toggleAll(true)">Select All</button>
+        <div id="selectionCount" style="font-size: 12px; color: #8E8E93;"></div>
+        <button class="btn-link" onclick="toggleAll(false)">Deselect All</button>
+    </div>
+
     <div id="flightList"></div>
-    <button id="syncBtn" class="btn-sync" onclick="exportToLogTen()">Sync to LogTen Pro</button>
+
+    <div class="footer">
+        <button id="syncBtn" class="btn-sync" onclick="exportToLogTen()">Sync to LogTen Pro</button>
+    </div>
 
     <script>
         let flights = [];
@@ -57,22 +77,36 @@
                 const line = row.trim();
                 if (!line || line.includes("OFF") || line.includes("DO")) return;
 
+                // Capture Date
                 const dateMatch = line.match(/\d{2}\/\d{2}\/\d{4}/);
                 if (dateMatch) activeDate = dateMatch[0];
 
+                // Capture Flight Number, Route, and Times
                 const flightMatch = line.match(/\b\d{3,4}\b(?=\s*\[)/);
                 const routeMatch = line.match(/([A-Z]{3})\s*-\s*([A-Z]{3})/);
-                const timeMatches = line.match(/\d{2}:\d{2}/g);
+                
+                // IMPROVED TIME PARSING: Looks for any HH:mm patterns
+                const timeMatches = line.match(/\b\d{2}:\d{2}\b/g);
 
                 if (flightMatch && routeMatch && activeDate) {
+                    // Logic to find correct Out/In times even if mixed with other numbers
+                    let outT = "00:00", inT = "00:00";
+                    if (timeMatches && timeMatches.length >= 2) {
+                        // Usually the 2nd and 3rd time on the line are the ones we want for AIMS print
+                        outT = timeMatches[timeMatches.length - 2];
+                        inT = timeMatches[timeMatches.length - 1];
+                    }
+
                     flights.push({
+                        id: Math.random().toString(36).substr(2, 9),
+                        selected: true,
                         date: activeDate,
                         flightNum: prefix + flightMatch[0],
                         origin: routeMatch[1],
                         destination: routeMatch[2],
-                        outTime: timeMatches ? timeMatches[1] : "00:00",
-                        inTime: timeMatches ? timeMatches[2] : "00:00",
-                        type: line.includes("POS") || line.includes("DH") ? 1 : 0
+                        outTime: outT,
+                        inTime: inT,
+                        type: (line.includes("POS") || line.includes("DH")) ? 1 : 0
                     });
                 }
             });
@@ -80,11 +114,21 @@
             renderFlights();
         }
 
+        function toggleAll(status) {
+            flights.forEach(f => f.selected = status);
+            renderFlights();
+        }
+
+        function updateSelectionCount() {
+            const count = flights.filter(f => f.selected).length;
+            document.getElementById('selectionCount').innerText = `${count} of ${flights.length} selected`;
+        }
+
         function renderFlights() {
             const list = document.getElementById('flightList');
             list.innerHTML = flights.map((f, i) => `
-                <div class="flight-item">
-                    <input type="checkbox" checked onchange="flights[${i}].selected = this.checked">
+                <div class="flight-item" style="background: ${f.selected ? '#F0F7FF' : '#FFF'}">
+                    <input type="checkbox" ${f.selected ? 'checked' : ''} onchange="flights[${i}].selected = this.checked; updateSelectionCount();">
                     <div class="flight-info">
                         <div class="flight-date">${f.date} | ${f.flightNum}</div>
                         <div class="flight-route">${f.origin} ✈️ ${f.destination}</div>
@@ -92,12 +136,17 @@
                     </div>
                 </div>
             `).join('');
-            document.getElementById('logStatus').innerText = `Found ${flights.length} sectors.`;
+            
+            document.getElementById('logStatus').innerText = `Parsed ${flights.length} sectors.`;
+            document.getElementById('bulkControls').style.display = flights.length > 0 ? 'flex' : 'none';
             document.getElementById('syncBtn').style.display = flights.length > 0 ? 'block' : 'none';
+            updateSelectionCount();
         }
 
         function exportToLogTen() {
-            const selected = flights.filter(f => f.selected !== false);
+            const selected = flights.filter(f => f.selected);
+            const includeNote = document.getElementById('includeNote').checked;
+            
             const entities = selected.map(f => ({
                 entity_name: "Flight",
                 flight_flightDate: f.date,
@@ -106,17 +155,17 @@
                 flight_to: f.destination,
                 flight_type: f.type,
                 flight_scheduledDepartureTime: `${f.date} ${f.outTime}`,
-                flight_scheduledArrivalTime: `${f.date} ${f.inTime}`
+                flight_scheduledArrivalTime: `${f.date} ${f.inTime}`,
+                flight_remarks: includeNote ? "Sync via Ecrew Grab Pro" : ""
             }));
 
             const package = {
-                metadata: { application: "Ecrew Grab Web", version: "1.0", dateFormat: "dd/MM/yyyy", dateAndTimeFormat: "dd/MM/yyyy HH:mm", timesAreZulu: true },
+                metadata: { application: "Ecrew Grab Web", version: "1.1", dateFormat: "dd/MM/yyyy", dateAndTimeFormat: "dd/MM/yyyy HH:mm", timesAreZulu: true },
                 entities: entities
             };
 
             const jsonStr = JSON.stringify(package);
-            const url = `logten://v2/addEntities?package=${encodeURIComponent(jsonStr)}`;
-            window.location.href = url;
+            window.location.href = `logten://v2/addEntities?package=${encodeURIComponent(jsonStr)}`;
         }
     </script>
 </body>
